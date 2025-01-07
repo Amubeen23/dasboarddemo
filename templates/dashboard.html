@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Portfolio Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+
+<body>
+    <div class="dashboard">
+        <div class="header">
+            <h1>Stock Portfolio Dashboard</h1>
+
+            <div class="search-container">
+                <input type="text" id="stockSymbol" placeholder="Enter stock symbol (e.g., AAPL)">
+                <button onclick="addStock()">Add Stock</button>
+            </div>
+        </div>
+
+        <div class="stock-grid" id="stockGrid">
+            {% for symbol, data in stocks.items() %}
+            <div class="stock-card" id="card-{{ symbol }}" data-symbol="{{ symbol }}"
+                data-historical='{{ data.historical | default([]) | tojson | safe }}'
+                data-dates='{{ data.dates | default([]) | tojson | safe }}'
+                data-details="{{ data.details|tojson|safe }}">
+                <div class="stock-header">
+                    <h2>{{ symbol }}</h2>
+                    <div class="stock-price">${{ "%.2f"|format(data.current_price) }}</div>
+                </div>
+                <div class="stock-change {% if data.change > 0 %}positive{% else %}negative{% endif %}">
+                    {{ "%.2f"|format(data.change) }}%
+                </div>
+                <canvas id="chart-{{ symbol }}"></canvas>
+                <div class="stock-details">
+                    <div class="detail-item">
+                        <strong>Volume:</strong> {{ "{:,.0f}".format(data.volume) }}
+                    </div>
+                    <div class="detail-item">
+                        <strong>Market Cap:</strong>
+                        {% if data.market_cap != 'N/A' %}
+                        ${{ "{:,.0f}".format(data.market_cap/1000000000) }}B
+                        {% else %}
+                        N/A
+                        {% endif %}
+                    </div>
+                    <div class="detail-item">
+                        <strong>P/E Ratio:</strong>
+                        {% if data.pe_ratio != 'N/A' %}
+                        {{ "%.2f"|format(data.pe_ratio) }}
+                        {% else %}
+                        N/A
+                        {% endif %}
+                    </div>
+                </div>
+                <button class="details-button" onclick="showDetails('{{ symbol }}')">
+                    View Details
+                </button>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Modal -->
+    <div id="detailsModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <div id="modalContent"></div>
+        </div>
+    </div>
+
+    <script>
+        document.querySelectorAll('.stock-card').forEach(card => {
+            try {
+                const symbol = card.dataset.symbol;
+
+                // Debug Raw Data
+                console.log(`Raw Data for ${symbol}:`);
+                console.log('Historical:', card.dataset.historical);
+                console.log('Dates:', card.dataset.dates);
+
+                let historical = [];
+                let dates = [];
+                try {
+                    historical = JSON.parse(card.dataset.historical || '[]');
+                    dates = JSON.parse(card.dataset.dates || '[]');
+                } catch (e) {
+                    console.error(`Failed to parse JSON for ${symbol}:`, e);
+                }
+
+                console.log('Parsed Historical:', historical);
+                console.log('Parsed Dates:', dates);
+
+                if (historical.length === 0 || dates.length === 0) {
+                    console.warn(`No data available for ${symbol}`);
+                    return;
+                }
+
+                const ctx = document.getElementById(`chart-${symbol}`);
+                if (!ctx) {
+                    console.warn(`Canvas not found for ${symbol}`);
+                    return;
+                }
+
+                new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: dates,
+                        datasets: [{
+                            label: `${symbol} Price`,
+                            data: historical,
+                            borderColor: '#3b82f6',
+                            tension: 0.1,
+                            borderWidth: 2,
+                            pointRadius: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: true,
+                        plugins: {
+                            legend: {
+                                display: false
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: false
+                            },
+                            x: {
+                                display: false
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error(`Error initializing chart: ${error}`);
+            }
+        });
+
+
+        // Modal functionality
+        const modal = document.getElementById('detailsModal');
+        const span = document.getElementsByClassName('close')[0];
+
+        span.onclick = function () {
+            modal.style.display = "none";
+        }
+
+        window.onclick = function (event) {
+            if (event.target == modal) {
+                modal.style.display = "none";
+            }
+        }
+
+        function formatValue(value) {
+            if (typeof value === 'number') {
+                if (Math.abs(value) < 0.01) return value.toExponential(2);
+                return value.toFixed(2);
+            }
+            return value;
+        }
+
+        function showDetails(symbol) {
+            const card = document.querySelector(`#card-${symbol}`);
+            let details = {};
+            try {
+                details = JSON.parse(card.dataset.details || '{}'); 
+            } catch (e) {
+                console.error(`Failed to parse details for ${symbol}:`, e);
+                details = {}; // Fallback to empty object
+            }
+
+
+            if (!details) {
+                alert('No details available for this stock');
+                return;
+            }
+
+            const content = document.getElementById('modalContent');
+            content.innerHTML = `
+                <h2>${details.name || symbol} (${symbol})</h2>
+                <div class="company-info">
+                    <p><strong>Sector:</strong> ${details.sector || 'N/A'}</p>
+                    <p><strong>Industry:</strong> ${details.industry || 'N/A'}</p>
+                    <p><strong>Employees:</strong> ${details.employees ? details.employees.toLocaleString() : 'N/A'}</p>
+                    <p><strong>Website:</strong> ${details.website ? `<a href="${details.website}" target="_blank">${details.website}</a>` : 'N/A'}</p>
+                </div>
+                <h3>Key Financial Ratios</h3>
+                <div class="ratios-grid">
+                    ${details.ratios ? Object.entries(details.ratios).map(([key, value]) => `
+                        <div class="ratio-item">
+                            <strong>${key}:</strong> ${formatValue(value)}
+                        </div>
+                    `).join('') : 'No ratios available'}
+                </div>
+            `;
+            modal.style.display = "block";
+        }
+
+        function addStock() {
+            const symbol = document.getElementById('stockSymbol').value.toUpperCase();
+            if (!symbol) return;
+
+            fetch('/add_stock', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `symbol=${symbol}`
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        alert(data.error);
+                        return;
+                    }
+
+                    // Creating new stock card dynamically
+                    const stockGrid = document.getElementById('stockGrid');
+                    const card = document.createElement('div');
+                    card.classList.add('stock-card');
+                    card.id = `card-${symbol}`;
+                    card.dataset.symbol = symbol;
+                    card.dataset.historical = JSON.stringify(data.historical);
+                    card.dataset.dates = JSON.stringify(data.dates);
+                    card.dataset.details = JSON.stringify(data.details);
+
+                    card.innerHTML = `
+                <div class="stock-header">
+                    <h2>${symbol}</h2>
+                    <div class="stock-price">$${data.current_price.toFixed(2)}</div>
+                </div>
+                <div class="stock-change ${data.change > 0 ? 'positive' : 'negative'}">
+                    ${data.change.toFixed(2)}%
+                </div>
+                <canvas id="chart-${symbol}"></canvas>
+                <div class="stock-details">
+                    <div class="detail-item"><strong>Volume:</strong> ${data.volume.toLocaleString()}</div>
+                    <div class="detail-item"><strong>Market Cap:</strong> 
+                        ${data.market_cap !== 'N/A' ? `$${(data.market_cap / 1e9).toFixed(2)}B` : 'N/A'}
+                    </div>
+                    <div class="detail-item"><strong>P/E Ratio:</strong> 
+                        ${data.pe_ratio !== 'N/A' ? data.pe_ratio.toFixed(2) : 'N/A'}
+                    </div>
+                </div>
+                <button class="details-button" onclick="showDetails('${symbol}')">View Details</button>
+            `;
+                    stockGrid.appendChild(card);
+
+                    // new chart for new ticker
+                    const ctx = document.getElementById(`chart-${symbol}`);
+                    new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: data.dates,
+                            datasets: [{
+                                label: `${symbol} Price`,
+                                data: data.historical,
+                                borderColor: '#3b82f6',
+                                tension: 0.1,
+                                borderWidth: 2,
+                                pointRadius: 0
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: true,
+                            plugins: { legend: { display: false } },
+                            scales: { y: { beginAtZero: false }, x: { display: false } }
+                        }
+                    });
+
+                    alert(`${symbol} added successfully!`);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error adding stock');
+                });
+        }
+
+        document.getElementById('stockSymbol').addEventListener('keypress', function (e) {
+            if (e.key === 'Enter') {
+                addStock();
+            }
+        });
+    </script>
+</body>
+
+</html>
